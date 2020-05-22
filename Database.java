@@ -18,80 +18,117 @@ public class Database {
         }
     }
 
-    public int getNumFree(String library) {
-        ResultSet rs = null;
-        int freeSeats = 0;
+    public String displayAllLibraries() {
+        String result = "";
+        int numFree = 0;
+        String currentLibrary = "central";
         try {
-            rs = statement.executeQuery("select * from tablesdb." + library);
+            ResultSet rs = statement
+                    .executeQuery("select * from tablesdb.overall where taken = 0");
             while (rs.next()) {
-                freeSeats += rs.getInt("freeseats");
+                String library = rs.getString("venue");
+                if (!library.equals(currentLibrary)) {
+                    result += "No. of free seats at " + currentLibrary + " library: " +
+                            numFree + "\n";
+                    currentLibrary = library;
+                    numFree = 0;
+                }
+                numFree++;
             }
+            result += "No. of free seats at " + currentLibrary + " library: " +
+                    numFree;
         } catch (SQLException throwables) {
             throwables.printStackTrace();
         }
-        return freeSeats;
+        return result;
     }
 
-    public void takeTable(String string) {
+    public boolean takeSeat(String seatId) {
         PreparedStatement preparedStmt = null;
-        int oldValue = 0;
-        String query = "select * from tablesdb.science where id = ?";
+        boolean success = false;
+        int taken = 0;
+
+        String query = "select * from tablesdb.overall where id = ?";
         try {
             preparedStmt = connection.prepareStatement(query);
-            preparedStmt.setString(1, string);
+            preparedStmt.setString(1, seatId);
             ResultSet rs = preparedStmt.executeQuery();
             while (rs.next()) {
-                oldValue = rs.getInt("freeseats");
+                taken = rs.getInt("taken");
             }
-            System.out.println(oldValue);
-
         } catch (SQLException throwables) {
             throwables.printStackTrace();
         }
 
-        int newValue = oldValue - 1;
-        String update = "update tablesdb.science set freeseats = ? where id = ?";
+        if (taken == 0) {
+            String update = "update tablesdb.overall set taken = 1 where id = ?";
+            try {
+                preparedStmt = connection.prepareStatement(update);
+                preparedStmt.setString(1, seatId);
+                preparedStmt.executeUpdate();
+                success = true;
+            } catch (SQLException throwables) {
+                throwables.printStackTrace();
+            }
+        }
+        return success;
+    }
 
+    public void leaveSeat(String seatId) {
+        String update = "update tablesdb.overall set taken = 0 where id = ?";
         try {
-            preparedStmt = connection.prepareStatement(update);
-            preparedStmt.setInt(1, newValue);
-            preparedStmt.setString(2, string);
+            PreparedStatement preparedStmt = connection.prepareStatement(update);
+            preparedStmt.setString(1, seatId);
             preparedStmt.executeUpdate();
         } catch (SQLException throwables) {
             throwables.printStackTrace();
         }
     }
 
-    public void leaveTable(String string) {
-        PreparedStatement preparedStmt = null;
-        int oldValue = 0;
-        String query = "select * from tablesdb.science where id = ?";
+    public int queryFreeSeats(String queryLibrary, int floor) {
+        String query = "select * from tablesdb.overall where venue = ? and floor = ? and taken = 0";
+        int sum = 0;
         try {
-            preparedStmt = connection.prepareStatement(query);
-            preparedStmt.setString(1, string);
+            PreparedStatement preparedStmt = connection.prepareStatement(query);
+            preparedStmt.setString(1, queryLibrary);
+            preparedStmt.setInt(2, floor);
             ResultSet rs = preparedStmt.executeQuery();
             while (rs.next()) {
-                oldValue = rs.getInt("freeseats");
+                sum++;
             }
-            System.out.println(oldValue);
-
         } catch (SQLException throwables) {
             throwables.printStackTrace();
         }
-
-        int newValue = oldValue + 1;
-        String update = "update tablesdb.science set freeseats = ? where id = ?";
-
-        try {
-            preparedStmt = connection.prepareStatement(update);
-            preparedStmt.setInt(1, newValue);
-            preparedStmt.setString(2, string);
-            preparedStmt.executeUpdate();
-        } catch (SQLException throwables) {
-            throwables.printStackTrace();
-        }
+        return sum;
     }
 
+    public String getFreeSeatsByTable(String queryLibrary, int floor) {
+        String query = "select * from tablesdb.overall where venue = ? and floor = ? and taken = 0";
+        String acc = "";
+        int prevTableId = 0;
+
+        try {
+            PreparedStatement preparedStmt = connection.prepareStatement(query);
+            preparedStmt.setString(1, queryLibrary);
+            preparedStmt.setInt(2, floor);
+            ResultSet rs = preparedStmt.executeQuery();
+
+            while (rs.next()) {
+                int currentTableId = rs.getInt("table_id");
+                if (currentTableId != prevTableId)  {
+                    prevTableId = currentTableId;
+                    acc += "\nTable " + currentTableId + ": ";
+                    acc += rs.getString("id");
+                } else {
+                    acc += ", " + rs.getString("id");
+                }
+            }
+
+        } catch (SQLException throwables) {
+            throwables.printStackTrace();
+        }
+        return acc;
+    }
 
     public Statement getStatement() {
         return this.statement;

@@ -1,6 +1,4 @@
 import org.telegram.telegrambots.api.methods.send.SendMessage;
-import org.telegram.telegrambots.api.methods.updatingmessages.EditMessageReplyMarkup;
-import org.telegram.telegrambots.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.api.objects.Update;
 import org.telegram.telegrambots.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.api.objects.replykeyboard.ReplyKeyboardMarkup;
@@ -10,17 +8,15 @@ import org.telegram.telegrambots.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.exceptions.TelegramApiException;
 
-
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
-
-import static java.lang.Math.toIntExact;
 
 public class Bot extends TelegramLongPollingBot {
 
     private Database database = new Database();
     private Statement myStmt = database.getStatement();
+    private String seatId = null;
 
     /**
      * Method for receiving messages.
@@ -28,185 +24,146 @@ public class Bot extends TelegramLongPollingBot {
      */
     @Override
     public void onUpdateReceived(Update update) {
-
         if (update.hasMessage() && update.getMessage().hasText()) {
             String textReceived = update.getMessage().getText();
             long chatId = update.getMessage().getChatId();
+            SendMessage sendMessage = new SendMessage().setChatId(chatId);
 
-            switch (textReceived) {
-                case "/start":
-                    String reply = "Hi, I am the Chairman. I can help you to find a seat!";
-                    SendMessage sendMessage = new SendMessage()
-                            .setChatId(chatId)
-                            .setText(reply);
+            if (textReceived.equals("/start")) {
+                String introMsg = "Hi, I am the Chairman. Let's find a seat?" +
+                        "\n\nSend /stats to check the overall seats availability." +
+                        "\nSend /find_free_seats to look at the free seats." +
+                        "\nTo take a seat, send /take_seatID (E.g. /take_S1001)" +
+                        "\nSimply send /leave_seat when you leave!";
+                sendMessage.setText(introMsg);
 
-                    ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
-                    List<KeyboardRow> keyboard = new ArrayList<>();
-                    KeyboardRow row1 = new KeyboardRow();
-                    row1.add("/stats");
-                    row1.add("/query");
-                    row1.add("/suggest");
-                    keyboard.add(row1);
+                ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+                List<KeyboardRow> keyboard = new ArrayList<>();
+                KeyboardRow row1 = new KeyboardRow();
+                row1.add("/stats");
+                row1.add("/status");
+                row1.add("/close");
+                keyboard.add(row1);
 
-                    KeyboardRow row2 = new KeyboardRow();
-                    row2.add("Take Seat");
-                    row2.add("Leave Seat");
-                    keyboard.add(row2);
+                KeyboardRow row2 = new KeyboardRow();
+                row2.add("/find_free_seats");
+                row2.add("/leave_seat");
+                keyboard.add(row2);
 
-                    keyboardMarkup.setKeyboard(keyboard);
-                    sendMessage.setReplyMarkup(keyboardMarkup);
+                keyboardMarkup.setKeyboard(keyboard);
+                sendMessage.setReplyMarkup(keyboardMarkup);
+            } else if (textReceived.equals("/stats")) {
+                sendMessage.setText(database.displayAllLibraries());
+            } else if (textReceived.equals("/find_free_seats")) {
+                sendMessage.setText("Which library would you like to find out?");
 
-                    try {
-                        execute(sendMessage);
-                        break;
-                    } catch (TelegramApiException e) {
-                        e.printStackTrace();
+                InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
+                List<InlineKeyboardButton> rowInline = new ArrayList<>();
+                rowInline.add(new InlineKeyboardButton().setText("Science Lib")
+                        .setCallbackData("queryScience"));
+                rowInline.add(new InlineKeyboardButton().setText("Central Lib")
+                        .setCallbackData("queryCentral"));
+                rowsInline.add(rowInline);
+                markupInline.setKeyboard(rowsInline);
+                sendMessage.setReplyMarkup(markupInline);
+            } else if (textReceived.contains("/take_")) {
+                if (this.seatId != null) {
+                    sendMessage.setText("You already seated at SeatID: " + this.seatId);
+                } else {
+                    String seatId = textReceived.substring(6);
+                    char prefix = seatId.charAt(0);
+                    int body = Integer.parseInt(seatId.substring(1));
+                    if (prefix == 'C' && (body >= 1001 && body < 2012) ||
+                            prefix == 'S' && (body >= 1001 && body < 2012)) {
+                        if (database.takeSeat(seatId)) {
+                            this.seatId = seatId;
+                            sendMessage.setText("You took SeatID: " + this.seatId);
+                        } else {
+                            sendMessage.setText("SeatID: " + seatId +
+                                    " is already taken by someone else!");
+                        }
+                    } else {
+                        sendMessage.setText("Invalid SeatID!");
                     }
-
-                case "/stats":
-                      String string = "";
-                      int result = database.getNumFree("science");
-                      string += "No.of free tables at Science Library: " + result;
-
-                      result = database.getNumFree("central");
-                      string += "\nNo.of free tables at Central Library: " + result;
-
-                      sendMessage = new SendMessage();
-                      sendMessage.setChatId(chatId).setText(string);
-
-                    try {
-                        execute(sendMessage);
-                        break;
-                    } catch (TelegramApiException e) {
-                        e.printStackTrace();
-                    }
-
-                case "Take Seat":
-                    SendMessage newMessage = new SendMessage()
-                            .setChatId(chatId)
-                            .setText("Which library?");
-
-                    InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
-                    List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
-                    List<InlineKeyboardButton> rowInline = new ArrayList<>();
-                    rowInline.add(new InlineKeyboardButton().setText("Science Lib")
-                            .setCallbackData("science"));
-                    rowInline.add(new InlineKeyboardButton().setText("Central Lib")
-                            .setCallbackData("central"));
-                    rowsInline.add(rowInline);
-                    markupInline.setKeyboard(rowsInline);
-                    newMessage.setReplyMarkup(markupInline);
-
-                    try {
-                        execute(newMessage);
-                    } catch (TelegramApiException e) {
-                        e.printStackTrace();
-                    }
-                    break;
-
-                case "Leave Seat":
-                    SendMessage newMessage = new SendMessage()
-                            .setChatId(chatId)
-                            .setText("Which library?");
-
-                    InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
-                    List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
-                    List<InlineKeyboardButton> rowInline = new ArrayList<>();
-                    rowInline.add(new InlineKeyboardButton().setText("Science Lib")
-                            .setCallbackData("science"));
-                    rowInline.add(new InlineKeyboardButton().setText("Central Lib")
-                            .setCallbackData("central"));
-                    rowsInline.add(rowInline);
-                    markupInline.setKeyboard(rowsInline);
-                    newMessage.setReplyMarkup(markupInline);
-
-                    try {
-                        execute(newMessage);
-                    } catch (TelegramApiException e) {
-                        e.printStackTrace();
-                    }
-                    break;
-
-                    default:
+                }
+            } else if (textReceived.equals("/leave_seat")) {
+                if (seatId != null) {
+                    database.leaveSeat(seatId);
+                    String reply = "Left the seat!";
+                    seatId = null;
+                    sendMessage.setText(reply);
+                } else {
+                    sendMessage.setText("You have not taken a seat.");
+                }
+            } else if (textReceived.equals("/close")) {
+                if (seatId != null) {
+                    database.leaveSeat(seatId);
+                }
+                ReplyKeyboardRemove keyboardMarkup = new ReplyKeyboardRemove();
+                String reply = "Thank you using our bot!";
+                sendMessage.setText(reply).setReplyMarkup(keyboardMarkup);
+            } else if (textReceived.equals("/status")) {
+                if (seatId != null) {
+                    sendMessage.setText("Seated at: " +
+                            "\nSeatID: " + seatId);
+                } else {
+                    sendMessage.setText("Not seated");
+                }
+            }
+            try {
+                execute(sendMessage);
+            } catch (TelegramApiException e) {
+                System.err.println(e.getMessage());
             }
         } else if (update.hasCallbackQuery()) {
             String callData = update.getCallbackQuery().getData();
-            long messageId = update.getCallbackQuery().getMessage().getMessageId();
             long chatId =  update.getCallbackQuery().getMessage().getChatId();
+            SendMessage sendMessage = new SendMessage().setChatId(chatId);
 
-            if (callData.equals("science")) {
-                SendMessage sendMessage = new SendMessage();
-                sendMessage.setChatId(chatId).setText("Which floor?");
+            if (callData.equals("queryScience")) {
+                String queryLibrary = callData.substring(5);
+                String reply =  "------ " + queryLibrary + " Library ------";
+                int sum = database.queryFreeSeats(queryLibrary, 1);
+                reply += "\nNo. of free seats on Level 1: " + sum;
+                sum = database.queryFreeSeats(queryLibrary, 2);
+                reply += "\nNo. of free seats on Level 2: " + sum;
+                sendMessage.setText(reply);
+
+                try {
+                    execute(sendMessage);
+                } catch (TelegramApiException e) {
+                    e.printStackTrace();
+                }
+
+                reply = "Which Level?";
+                sendMessage.setText(reply);
 
                 InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
                 List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
                 List<InlineKeyboardButton> rowInline = new ArrayList<>();
                 rowInline.add(new InlineKeyboardButton().setText("Level 1")
-                        .setCallbackData("take sci l1"));
+                        .setCallbackData("queryScience_1"));
                 rowInline.add(new InlineKeyboardButton().setText("Level 2")
-                        .setCallbackData("take sci l2"));
+                        .setCallbackData("queryScience_2"));
                 rowsInline.add(rowInline);
                 markupInline.setKeyboard(rowsInline);
                 sendMessage.setReplyMarkup(markupInline);
-
-                try {
-                    execute(sendMessage);
-                } catch (TelegramApiException e) {
-                    e.printStackTrace();
-                }
-            } else if (callData.equals("take sci l1")) {
-                SendMessage sendMessage = new SendMessage();
-                sendMessage.setChatId(chatId).setText("Enter a seat number: ");
-
-                InlineKeyboardMarkup markupInline = new InlineKeyboardMarkup();
-                List<List<InlineKeyboardButton>> rowsInline = new ArrayList<>();
-                List<InlineKeyboardButton> rowInline = new ArrayList<>();
-                rowInline.add(new InlineKeyboardButton().setText("01").setCallbackData("takes101"));
-                rowInline.add(new InlineKeyboardButton().setText("02").setCallbackData("takes102"));
-                rowInline.add(new InlineKeyboardButton().setText("03").setCallbackData("takes103"));
-
-
-                rowsInline.add(rowInline);
-                markupInline.setKeyboard(rowsInline);
-                sendMessage.setReplyMarkup(markupInline);
-
-                try {
-                    execute(sendMessage);
-                } catch (TelegramApiException e) {
-                    e.printStackTrace();
-                }
-            } else if (callData.contains("takes1")) {
-                database.takeTable(callData);
-                SendMessage sendMessage = new SendMessage();
-                sendMessage.setChatId(chatId).setText("Done!");
-                try {
-                    execute(sendMessage);
-                } catch (TelegramApiException e) {
-                    e.printStackTrace();
-                }
+            } else if (callData.contains("queryScience_")) {
+                int level = Integer.parseInt(callData.substring(13));
+                String reply = "Free seats on " + "level " + level + ":\n";
+                reply += database.getFreeSeatsByTable("science", level);
+                sendMessage.setText(reply);
             }
-
-             else if (callData.equals("1")) {
-                try {
-                    int rowsAffected = myStmt.executeUpdate(
-                            "update tablesdb.science " +
-                                    "set taken= '0' " +
-                                    "where id = '1'");
-                } catch (SQLException throwables) {
-                    throwables.printStackTrace();
-                }
-                String answer = "Done!";
-                SendMessage sendMessage = new SendMessage()
-                        .setChatId(chatId)
-                        .setText(answer);
-                try {
-                    execute(sendMessage);
-                } catch (TelegramApiException e) {
-                    e.printStackTrace();
-                }
+            try {
+                execute(sendMessage);
+            } catch (TelegramApiException e) {
+                e.printStackTrace();
             }
         }
     }
+
+
 
 
 
